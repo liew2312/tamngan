@@ -3,6 +3,7 @@
 <head>
   <base target="_top">
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>ตามงาน</title>
   <script>
     /* ===== ตั้งค่าเชื่อมต่อ (แก้เฉพาะบรรทัดนี้) =====
@@ -209,7 +210,8 @@
     <!-- 1. Dashboard -->
     <div id="screen-dashboard" class="screen hidden">
       <div class="header">
-        <div>
+        <button class="icon-btn boss-only" onclick="switchTab('summary')" title="สรุปภาพรวม"><i class="fa-solid fa-chart-pie"></i></button>
+        <div style="flex-grow:1;">
           <p class="greeting"><i class="fa-solid fa-layer-group"></i>ภาพรวมทีม</p>
           <h1 class="title">งานของทีม</h1>
         </div>
@@ -364,6 +366,16 @@
         <button class="chip" data-pt="rank" onclick="setPerfTab('rank')"><i class="fa-solid fa-ranking-star"></i>Leaderboard</button>
       </div>
       <div style="padding:8px 24px 0;" id="perf-list"></div>
+    </div>
+
+    <!-- 9. Summary (สรุปภาพรวม) -->
+    <div id="screen-summary" class="screen hidden">
+      <div class="header">
+        <button class="icon-btn" onclick="goBack('dashboard')"><i class="fa-solid fa-chevron-left"></i></button>
+        <div style="flex-grow:1;"><p class="greeting"><i class="fa-solid fa-chart-pie"></i>สรุปภาพรวมทีม</p><h1 class="title">Summary</h1></div>
+        <button class="icon-btn" onclick="reloadData()" title="รีเฟรช"><i class="fa-solid fa-rotate"></i></button>
+      </div>
+      <div style="padding:8px 24px 0;" id="summary-list"></div>
     </div>
 
     <!-- 8. More -->
@@ -789,7 +801,7 @@
 
     /* ---------- navigation ---------- */
     function switchTab(tab) {
-      if ((tab === 'team' || tab === 'add') && !isBoss) return;
+      if ((tab === 'team' || tab === 'add' || tab === 'summary') && !isBoss) return;
       activeTab = tab;
       document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
       if (tab === 'home') { renderDashboard(); showScreen('screen-dashboard'); }
@@ -798,6 +810,7 @@
       else if (tab === 'more') { renderMore(); showScreen('screen-more'); }
       else if (tab === 'team') { renderTeam(); showScreen('screen-team'); }
       else if (tab === 'performance') { renderPerformance(); showScreen('screen-performance'); }
+      else if (tab === 'summary') { renderSummary(); showScreen('screen-summary'); }
     }
     function showScreen(id) {
       document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
@@ -828,7 +841,7 @@
       document.getElementById('st-today').innerText = scope.filter(t => matchFilter(t, 'today')).length;
       document.getElementById('st-week').innerText = scope.filter(t => matchFilter(t, 'week')).length;
       let html;
-      if (isBoss && dashFilter === 'team') html = managerWidgets() + teamCardsHtml();
+      if (isBoss && dashFilter === 'team') html = teamCardsHtml();
       else {
         const f = (dashFilter === 'team') ? 'all' : dashFilter;
         const items = scope.filter(t => matchFilter(t, f));
@@ -836,21 +849,54 @@
       }
       document.getElementById('main-list').innerHTML = html;
     }
-    function managerWidgets() {
-      const rows = appData.users.filter(isActive).map(u => ({ u, m: computeMetrics(u.UserID) })).filter(x => x.m.total > 0);
-      if (!rows.length) return '';
-      const top = rows.slice().sort((a, b) => b.m.kpi - a.m.kpi).slice(0, 5);
-      const backlog = rows.slice().sort((a, b) => b.m.overdue - a.m.overdue)[0];
-      const avg = Math.round(rows.reduce((s, x) => s + x.m.kpi, 0) / rows.length);
-      let h = `<div class="card"><div class="section-title" style="margin:0 0 10px;"><i class="fa-solid fa-trophy"></i>Top 5 ผลงานดีที่สุด</div>`;
-      top.forEach((x, i) => {
-        h += `<div class="row" style="margin-bottom:8px;"><span style="width:22px;text-align:center;">${['🥇','🥈','🥉'][i] || (i + 1)}</span>${avatarDiv(x.u)}<div style="flex-grow:1;"><h4 style="margin:0;font-size:14px;">${x.u.Name}</h4><p class="meta" style="margin:0;">สำเร็จ ${pct(x.m.completionRate)}</p></div><div class="kpi-ring" style="width:40px;height:40px;font-size:13px;background:${kpiMeta(x.m.kpi).bg};color:${kpiMeta(x.m.kpi).color};">${x.m.kpi}</div></div>`;
-      });
-      h += `</div>`;
-      h += `<div class="card"><div class="row"><div class="mini-stat"><div class="n" style="color:var(--primary-fg);">${avg}</div><div class="l">KPI เฉลี่ยทีม</div></div>`;
-      if (backlog && backlog.m.overdue > 0) h += `<div class="mini-stat"><div class="n" style="color:var(--rose-fg);">${backlog.u.Name}</div><div class="l">งานค้างเยอะสุด (${backlog.m.overdue})</div></div>`;
-      h += `</div></div>`;
-      return h;
+    /* ---------- summary page (หัวหน้า) ---------- */
+    function renderSummary() {
+      const all = appData.tasks.filter(t => !isCancelled(t));
+      const total = all.length;
+      const done = all.filter(isDone).length;
+      const inprog = all.filter(t => !isClosed(t) && (t.Status === 'กำลังทำ' || t.Status === 'รอตรวจ')).length;
+      const notStarted = all.filter(t => !isClosed(t) && (t.Status === 'ยังไม่เริ่ม' || !t.Status)).length;
+      const overdue = all.filter(t => matchFilter(t, 'overdue')).length;
+      const rows = appData.users.filter(isActive).map(u => ({ u, m: computeMetrics(u.UserID) }));
+      const active = rows.filter(x => x.m.total > 0);
+      const avg = active.length ? Math.round(active.reduce((s, x) => s + x.m.kpi, 0) / active.length) : 0;
+      const top = active.slice().sort((a, b) => b.m.kpi - a.m.kpi).slice(0, 5);
+      const backlog = active.slice().sort((a, b) => b.m.overdue - a.m.overdue)[0];
+      const bestOnTime = active.slice().sort((a, b) => b.m.onTimeRate - a.m.onTimeRate)[0];
+      const lowest = active.slice().sort((a, b) => a.m.kpi - b.m.kpi)[0];
+
+      const statCard = (n, l, c) => `<div class="mini-stat"><div class="n" style="color:${c};">${n}</div><div class="l">${l}</div></div>`;
+      const leaderRow = (title, x, sub, color) => x ? `<div class="row" style="padding:8px 0; border-bottom:1px solid var(--border);"><div style="flex-grow:1;"><p class="meta" style="margin:0;">${title}</p><h4 style="margin:1px 0 0; font-size:14px;">${x.u.Name}</h4></div><span style="font-weight:700; color:${color};">${sub}</span></div>` : '';
+
+      let h = '';
+      // ภาพรวมงานทั้งทีม
+      h += `<div class="card"><div class="section-title" style="margin:0 0 10px;"><i class="fa-solid fa-layer-group"></i>ภาพรวมงานทั้งทีม</div><div class="row">
+        ${statCard(total, 'ทั้งหมด', 'var(--text)')}
+        ${statCard(done, 'เสร็จ', 'var(--mint-fg)')}
+        ${statCard(inprog, 'กำลังทำ', 'var(--amber-fg)')}
+        ${statCard(notStarted, 'ยังไม่เริ่ม', 'var(--grey-fg)')}
+        ${statCard(overdue, 'เลยกำหนด', 'var(--rose-fg)')}
+      </div></div>`;
+      // KPI เฉลี่ยทีม
+      h += `<div class="card row"><div class="kpi-ring" style="background:${kpiMeta(avg).bg};color:${kpiMeta(avg).color};">${avg}</div><div style="flex-grow:1;"><h4 style="margin:0;">KPI เฉลี่ยทั้งทีม</h4><p class="meta" style="margin:2px 0 0;color:${kpiMeta(avg).color};font-weight:600;">${kpiMeta(avg).label}</p></div></div>`;
+      // Top 5
+      if (top.length) {
+        h += `<div class="card"><div class="section-title" style="margin:0 0 10px;"><i class="fa-solid fa-trophy"></i>Top 5 ผลงานดีที่สุด</div>`;
+        top.forEach((x, i) => {
+          h += `<div class="row" style="margin-bottom:8px;"><span style="width:24px;text-align:center;font-size:16px;">${['🥇','🥈','🥉'][i] || (i + 1)}</span>${avatarDiv(x.u)}<div style="flex-grow:1;"><h4 style="margin:0;font-size:14px;">${x.u.Name}</h4><p class="meta" style="margin:0;">สำเร็จ ${pct(x.m.completionRate)} · ตรงเวลา ${pct(x.m.onTimeRate)}</p></div><div class="kpi-ring" style="width:40px;height:40px;font-size:13px;background:${kpiMeta(x.m.kpi).bg};color:${kpiMeta(x.m.kpi).color};">${x.m.kpi}</div></div>`;
+        });
+        h += `</div>`;
+      }
+      // จุดที่ต้องโฟกัส (Team Leader view)
+      if (active.length) {
+        h += `<div class="card"><div class="section-title" style="margin:0 0 6px;"><i class="fa-solid fa-circle-exclamation"></i>จุดที่ต้องโฟกัส</div>`;
+        h += leaderRow('งานค้างเยอะสุด', backlog, (backlog ? backlog.m.overdue : 0) + ' งาน', 'var(--rose-fg)');
+        h += leaderRow('ส่งตรงเวลาดีสุด', bestOnTime, pct(bestOnTime ? bestOnTime.m.onTimeRate : 0), 'var(--mint-fg)');
+        h += leaderRow('คะแนนต่ำสุด', lowest, lowest ? lowest.m.kpi : 0, 'var(--amber-fg)');
+        h += `</div>`;
+      }
+      if (!total) h = emptyBox('ยังไม่มีข้อมูลงาน', 'fa-chart-pie');
+      document.getElementById('summary-list').innerHTML = h;
     }
     function teamCardsHtml() {
       if (!appData.users.length) return emptyBox('ยังไม่มีสมาชิกทีม', 'fa-user');
