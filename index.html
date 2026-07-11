@@ -819,7 +819,7 @@
 
     /* ---------- navigation ---------- */
     function switchTab(tab) {
-      if ((tab === 'team' || tab === 'add' || tab === 'summary') && !isBoss) return;
+      if ((tab === 'team' || tab === 'add' || tab === 'summary' || tab === 'performance') && !isBoss) return;
       activeTab = tab;
       document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
       if (tab === 'home') { renderDashboard(); showScreen('screen-dashboard'); }
@@ -863,7 +863,18 @@
       else {
         const f = (dashFilter === 'team') ? 'all' : dashFilter;
         const items = scope.filter(t => matchFilter(t, f));
-        html = items.length ? items.map(t => taskCard(t, isBoss, 'dashboard')).join('') : emptyBox('ไม่มีงานในหมวดนี้', 'fa-circle-check');
+        if (f === 'all') {
+          // แยกงานที่ยังไม่เสร็จ (บน) กับงานที่เสร็จแล้ว (กลุ่มด้านล่าง)
+          const active = items.filter(t => !isDone(t));
+          const done = items.filter(isDone);
+          html = active.length ? active.map(t => taskCard(t, isBoss, 'dashboard')).join('') : emptyBox('ไม่มีงานค้าง 🎉', 'fa-circle-check');
+          if (done.length) {
+            html += `<div class="section-title" style="margin:18px 0 12px;"><i class="fa-solid fa-circle-check" style="color:var(--mint-fg);"></i>งานที่เสร็จแล้ว (${done.length})</div>`;
+            html += done.map(t => taskCard(t, isBoss, 'dashboard')).join('');
+          }
+        } else {
+          html = items.length ? items.map(t => taskCard(t, isBoss, 'dashboard')).join('') : emptyBox('ไม่มีงานในหมวดนี้', 'fa-circle-check');
+        }
       }
       document.getElementById('main-list').innerHTML = html;
     }
@@ -962,15 +973,16 @@
       renderTaskList();
     }
     function renderProjectChips() {
-      const projects = Array.from(new Set(appData.tasks.map(t => t.Project).filter(Boolean)));
+      const projects = Array.from(new Set(scopeTasks().map(t => t.Project).filter(Boolean)));
       const chip = (val, label) => `<button class="chip ${projectFilter === val ? 'active' : ''}" onclick="setProjectFilter('${val.replace(/'/g,"\\'")}')"><i class="fa-solid fa-diagram-project"></i>${label}</button>`;
       document.getElementById('tprojects').innerHTML = chip('__all__', 'ทุกโครงการ') + projects.map(p => chip(p, p)).join('');
     }
     function renderTasks() { renderProjectChips(); renderTaskList(); }
     function renderTaskList() {
+      const base = scopeTasks(); // หัวหน้าเห็นทุกงาน / พนักงานเห็นเฉพาะงานตัวเอง
       let items = (taskFilter === 'mine')
-        ? appData.tasks.filter(t => t.AssigneeID === myUserId && !isCancelled(t))
-        : appData.tasks.filter(t => matchFilter(t, taskFilter));
+        ? base.filter(t => t.AssigneeID === myUserId && !isCancelled(t))
+        : base.filter(t => matchFilter(t, taskFilter));
       if (projectFilter !== '__all__') items = items.filter(t => (t.Project || '') === projectFilter);
       const q = (document.getElementById('task-search').value || '').trim().toLowerCase();
       if (q) items = items.filter(t => ((t.Title || '') + ' ' + (t.Project || '') + ' ' + (t.AssigneeName || '')).toLowerCase().includes(q));
@@ -1035,7 +1047,7 @@
         items.push({ ico: 'fa-users', bg: 'var(--primary)', t: 'ทีมงาน', s: 'จัดการสมาชิก / เพิ่ม-ปิด-ลบ', fn: "switchTab('team')" });
         items.push({ ico: 'fa-chart-simple', bg: 'var(--mint)', t: 'ผลงาน (KPI)', s: 'Performance ของทีม', fn: "setPerfTab('perf'); switchTab('performance')" });
       }
-      items.push({ ico: 'fa-ranking-star', bg: 'var(--amber)', t: 'Leaderboard', s: 'อันดับคะแนน KPI', fn: "setPerfTab('rank'); switchTab('performance')" });
+      if (isBoss) items.push({ ico: 'fa-ranking-star', bg: 'var(--amber)', t: 'Leaderboard', s: 'อันดับคะแนน KPI', fn: "setPerfTab('rank'); switchTab('performance')" });
       items.push({ ico: 'fa-id-badge', bg: 'var(--primary-fg)', t: 'โปรไฟล์ของฉัน', s: (currentUser && currentUser.Email) || '', fn: "openProfile()" });
       items.push({ ico: 'fa-rotate', bg: 'var(--amber)', t: 'อัปเดต / เคลียร์แคช', s: 'ดึงเวอร์ชันล่าสุด (เวอร์ชัน ' + APP_VERSION + ')', fn: "clearCacheUpdate()" });
       items.push({ ico: 'fa-right-from-bracket', bg: 'var(--rose)', t: 'ออกจากระบบ', s: '', fn: "logout()" });
@@ -1107,10 +1119,8 @@
             <h4>${t.Title||''}</h4>
             <div style="display:flex; gap:6px; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end;">${prioBadge(t.Priority)}<span class="badge ${s.cls}"><i class="fa-solid ${s.icon}"></i>${s.label}</span></div>
           </div>
-          <p class="meta" style="margin:5px 0 0;">
-            <i class="fa-solid fa-diagram-project"></i>${t.Project||''}${showOwner && t.AssigneeName ? ' · ' + t.AssigneeName : ''}
-            &nbsp;·&nbsp;<i class="fa-solid fa-calendar-day"></i>${dueLabel(t)}
-          </p>
+          <p class="meta" style="margin:5px 0 0;"><i class="fa-solid fa-diagram-project"></i>${t.Project||'—'}${showOwner && t.AssigneeName ? ' · ' + t.AssigneeName : ''}</p>
+          <p class="meta" style="margin:2px 0 0;"><i class="fa-solid fa-calendar-day"></i>กำหนดจบ ${t.DueDate || '-'} · ${dueLabel(t)}</p>
           <div class="prog-bg"><div class="prog-fill" style="width:${t.Progress}%; background:${s.color}"></div></div>
         </div>`;
     }
@@ -1123,7 +1133,7 @@
       setAvatarEl(document.getElementById('u-avatar'), viewUser);
       document.getElementById('u-name').innerText = viewUser.Name || '';
       document.getElementById('u-role').innerHTML = (viewUser.Role || '') + (viewUser.Status ? ' · <span style="color:var(--primary-fg);">' + viewUser.Status + '</span>' : '');
-      document.getElementById('u-kpi').innerHTML = kpiCardHtml(userId);
+      document.getElementById('u-kpi').innerHTML = isBoss ? kpiCardHtml(userId) : '';
       const my = appData.tasks.filter(t => t.AssigneeID === userId);
       document.getElementById('u-task-list').innerHTML =
         my.length ? my.map(t => taskCard(t, false, 'user')).join('') : emptyBox('ยังไม่มีงานที่ได้รับมอบหมาย', 'fa-clipboard');

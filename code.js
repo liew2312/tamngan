@@ -221,8 +221,8 @@ function loginWithEmail(email) {
 function fetchAppData(actorEmail) {
   const currentUser = resolveCurrentUser_(actorEmail); // เรียกก่อน เพื่อให้ auto-register ปรากฏในรายชื่อ
 
-  const users = getSheetJson_('Users');
-  const tasks = getSheetJson_('Tasks');
+  let users = getSheetJson_('Users');
+  let tasks = getSheetJson_('Tasks');
   const comments = getSheetJson_('Comments');
 
   const dueLog = getSheetJson_('DueLog');
@@ -238,6 +238,12 @@ function fetchAppData(actorEmail) {
     t.comments = comments.filter(c => c.TaskID === t.TaskID);
     t.dueLog = dueLog.filter(d => d.TaskID === t.TaskID);
   });
+
+  // ความเป็นส่วนตัว: พนักงาน (ไม่ใช่หัวหน้า) รับเฉพาะงานของตัวเอง และเห็นเฉพาะข้อมูลตัวเอง
+  if (!currentUser.isBoss && currentUser.UserID) {
+    tasks = tasks.filter(t => t.AssigneeID === currentUser.UserID);
+    users = users.filter(u => u.UserID === currentUser.UserID);
+  }
 
   return { users: users, tasks: tasks, currentUser: currentUser };
 }
