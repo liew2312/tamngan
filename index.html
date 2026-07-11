@@ -160,6 +160,12 @@
     .nav button.active { color: var(--primary); }
     .nav button.add-btn i { background: var(--primary); color: #fff; width: 40px; height: 40px; border-radius: 14px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(91,130,224,.45); margin-top: -18px; }
     .nav button.add-btn { color: var(--primary-fg); font-weight: 600; }
+    .nav-badge { position: absolute; top: 2px; left: 54%; background: var(--rose); color: #fff; font-size: 9.5px; font-weight: 700; min-width: 16px; height: 16px; border-radius: 999px; display: flex; align-items: center; justify-content: center; padding: 0 4px; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+
+    /* toast */
+    .toast { position: fixed; left: 50%; transform: translateX(-50%) translateY(-16px); bottom: 90px; max-width: 400px; width: calc(100% - 32px); background: #2b3142; color: #fff; border-radius: 14px; padding: 13px 16px; font-size: 13px; box-shadow: var(--shadow-lg); z-index: 60; display: flex; align-items: center; gap: 10px; opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; cursor: pointer; }
+    .toast i { color: #ffd27a; font-size: 16px; }
 
     /* overlays: action sheet + modal */
     .backdrop { position: fixed; inset: 0; background: rgba(40,49,66,.42); z-index: 40; display: flex; align-items: flex-end; justify-content: center; }
@@ -387,12 +393,15 @@
     <!-- bottom nav -->
     <div class="nav" id="nav">
       <button data-tab="home" class="active" onclick="switchTab('home')"><i class="fa-solid fa-house"></i>หน้าหลัก</button>
-      <button data-tab="tasks" onclick="switchTab('tasks')"><i class="fa-solid fa-list-check"></i>งาน</button>
+      <button data-tab="tasks" onclick="switchTab('tasks')"><span class="nav-badge hidden" id="nav-review-badge">0</span><i class="fa-solid fa-list-check"></i>งาน</button>
       <button data-tab="add" class="add-btn boss-only" onclick="openAddSheet()"><i class="fa-solid fa-plus"></i>เพิ่ม</button>
       <button data-tab="calendar" onclick="switchTab('calendar')"><i class="fa-solid fa-calendar-days"></i>ปฏิทิน</button>
       <button data-tab="more" onclick="switchTab('more')"><i class="fa-solid fa-ellipsis"></i>เพิ่มเติม</button>
     </div>
   </div>
+
+  <!-- toast แจ้งเตือน -->
+  <div id="toast" class="toast" onclick="toastAction()"><i class="fa-solid fa-bell"></i><span id="toast-msg"></span></div>
 
   <!-- action sheet -->
   <div id="sheet" class="backdrop hidden" onclick="if(event.target===this)closeOverlay('sheet')">
@@ -549,6 +558,47 @@
       location.href = location.pathname + '?v=' + Date.now();
     }
 
+    /* ---------- แจ้งเตือน "งานรอตรวจ" (หัวหน้า) ---------- */
+    let reviewSeen = null, reviewInit = false, pollTimer = null, toastTimer = null, toastCb = null;
+    function showToast(msg, cb) {
+      const el = document.getElementById('toast');
+      document.getElementById('toast-msg').innerText = msg; toastCb = cb || null;
+      el.classList.add('show'); clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('show'), 6000);
+    }
+    function toastAction() { document.getElementById('toast').classList.remove('show'); if (toastCb) toastCb(); }
+    function notify(title, body) {
+      try { if (window.Notification && Notification.permission === 'granted') new Notification(title, { body: body, icon: 'icon.svg' }); } catch (e) {}
+    }
+    function updateReviewBadge(n) {
+      const b = document.getElementById('nav-review-badge'); if (!b) return;
+      if (isBoss && n > 0) { b.innerText = n > 9 ? '9+' : n; b.classList.remove('hidden'); } else b.classList.add('hidden');
+    }
+    function checkReviewNotify() {
+      if (!isBoss) { updateReviewBadge(0); return; }
+      const pending = appData.tasks.filter(t => t.Status === 'รอตรวจ');
+      const ids = pending.map(t => t.TaskID);
+      updateReviewBadge(ids.length);
+      if (!reviewInit) { reviewSeen = new Set(ids); reviewInit = true; return; } // baseline ตอนเข้าครั้งแรก ไม่เด้ง
+      const fresh = ids.filter(id => !reviewSeen.has(id));
+      if (fresh.length) {
+        const t0 = pending.find(t => t.TaskID === fresh[0]);
+        const msg = fresh.length === 1
+          ? `${(t0 && t0.AssigneeName) || 'ลูกน้อง'} ส่งงาน “${t0 && t0.Title}” ให้ตรวจ`
+          : `มี ${fresh.length} งานถูกส่งมาให้ตรวจ`;
+        showToast(msg, () => { setTaskFilter('review'); switchTab('tasks'); });
+        notify('มีงานรอตรวจ', msg);
+      }
+      reviewSeen = new Set(ids);
+    }
+    function maybeAskNotif() {
+      try { if (isBoss && window.Notification && Notification.permission === 'default') Notification.requestPermission(); } catch (e) {}
+    }
+    function startReviewPoll() {
+      if (pollTimer) return;
+      pollTimer = setInterval(() => { if (document.visibilityState === 'visible' && sessionEmail) reloadData(); }, 60000);
+    }
+
     /* ---------- session / login ---------- */
     let sessionEmail = '';
     // ⬇️ วาง URL ของ Apps Script Web App (.../exec) ตรงนี้เมื่อ deploy บน GitHub Pages
@@ -612,6 +662,7 @@
         onData(data);
         document.getElementById('screen-login').classList.add('hidden');
         activeTab = 'home'; switchTab('home');
+        maybeAskNotif(); startReviewPoll();
       };
       callServer('fetchAppData', [sessionEmail]).then(render)
         .catch(e => { showLogin(); document.getElementById('login-err').innerText = (e && e.message) || 'โหลดข้อมูลไม่สำเร็จ'; });
@@ -638,6 +689,7 @@
       });
       applyCurrentUser((data && data.currentUser) || {});
       renderAll();
+      checkReviewNotify();
       if (!myUserId) {
         document.getElementById('main-list').insertAdjacentHTML('afterbegin',
           '<div class="card" style="background:var(--amber-soft); border-color:var(--amber-soft);">' +
@@ -858,8 +910,13 @@
       document.getElementById('st-overdue').innerText = scope.filter(t => matchFilter(t, 'overdue')).length;
       document.getElementById('st-today').innerText = scope.filter(t => matchFilter(t, 'today')).length;
       document.getElementById('st-week').innerText = scope.filter(t => matchFilter(t, 'week')).length;
-      let html;
-      if (isBoss && dashFilter === 'team') html = teamCardsHtml();
+      let html = '';
+      // แถบเด้ง "งานรอตรวจ" สำหรับหัวหน้า
+      if (isBoss) {
+        const rev = appData.tasks.filter(t => t.Status === 'รอตรวจ').length;
+        if (rev > 0) html += `<div class="card" style="background:var(--amber-soft); border-color:var(--amber-soft); cursor:pointer;" onclick="setTaskFilter('review'); switchTab('tasks');"><p style="margin:0; font-size:13px; color:var(--amber-fg); font-weight:600;"><i class="fa-solid fa-hourglass-half"></i> มี ${rev} งานรอตรวจ · แตะเพื่ออนุมัติ</p></div>`;
+      }
+      if (isBoss && dashFilter === 'team') html += teamCardsHtml();
       else {
         const f = (dashFilter === 'team') ? 'all' : dashFilter;
         const items = scope.filter(t => matchFilter(t, f));
@@ -867,13 +924,13 @@
           // แยกงานที่ยังไม่เสร็จ (บน) กับงานที่เสร็จแล้ว (กลุ่มด้านล่าง)
           const active = items.filter(t => !isDone(t));
           const done = items.filter(isDone);
-          html = active.length ? active.map(t => taskCard(t, isBoss, 'dashboard')).join('') : emptyBox('ไม่มีงานค้าง 🎉', 'fa-circle-check');
+          html += active.length ? active.map(t => taskCard(t, isBoss, 'dashboard')).join('') : emptyBox('ไม่มีงานค้าง 🎉', 'fa-circle-check');
           if (done.length) {
             html += `<div class="section-title" style="margin:18px 0 12px;"><i class="fa-solid fa-circle-check" style="color:var(--mint-fg);"></i>งานที่เสร็จแล้ว (${done.length})</div>`;
             html += done.map(t => taskCard(t, isBoss, 'dashboard')).join('');
           }
         } else {
-          html = items.length ? items.map(t => taskCard(t, isBoss, 'dashboard')).join('') : emptyBox('ไม่มีงานในหมวดนี้', 'fa-circle-check');
+          html += items.length ? items.map(t => taskCard(t, isBoss, 'dashboard')).join('') : emptyBox('ไม่มีงานในหมวดนี้', 'fa-circle-check');
         }
       }
       document.getElementById('main-list').innerHTML = html;
