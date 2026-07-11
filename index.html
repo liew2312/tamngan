@@ -530,6 +530,24 @@
     let isBoss = false;       // สิทธิ์หัวหน้าทีม (ฝั่งเซิร์ฟเวอร์เป็นผู้ตัดสิน)
     let currentUser = null;   // ข้อมูลผู้ใช้ปัจจุบัน (คนที่ล็อกอิน)
     const PASTEL = ['#5b82e0','#e8536e','#e8942f','#22a97a','#a06ddb','#3fa9c4','#e07b9a'];
+    const APP_VERSION = '2.0';
+
+    /* อัปเดตเวอร์ชัน / เคลียร์แคช: ถอน service worker + ล้าง cache แล้วโหลดใหม่ */
+    async function clearCacheUpdate() {
+      if (!confirm('อัปเดตเป็นเวอร์ชันล่าสุดและล้างแคช?\nแอปจะโหลดใหม่')) return;
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r => r.unregister()));
+        }
+        if (window.caches) {
+          const ks = await caches.keys();
+          await Promise.all(ks.map(k => caches.delete(k)));
+        }
+      } catch (e) {}
+      // เพิ่ม query กันแคชเบราว์เซอร์ แล้วโหลดใหม่
+      location.href = location.pathname + '?v=' + Date.now();
+    }
 
     /* ---------- session / login ---------- */
     let sessionEmail = '';
@@ -1019,6 +1037,7 @@
       }
       items.push({ ico: 'fa-ranking-star', bg: 'var(--amber)', t: 'Leaderboard', s: 'อันดับคะแนน KPI', fn: "setPerfTab('rank'); switchTab('performance')" });
       items.push({ ico: 'fa-id-badge', bg: 'var(--primary-fg)', t: 'โปรไฟล์ของฉัน', s: (currentUser && currentUser.Email) || '', fn: "openProfile()" });
+      items.push({ ico: 'fa-rotate', bg: 'var(--amber)', t: 'อัปเดต / เคลียร์แคช', s: 'ดึงเวอร์ชันล่าสุด (เวอร์ชัน ' + APP_VERSION + ')', fn: "clearCacheUpdate()" });
       items.push({ ico: 'fa-right-from-bracket', bg: 'var(--rose)', t: 'ออกจากระบบ', s: '', fn: "logout()" });
       document.getElementById('more-list').innerHTML = items.map(it =>
         `<div class="more-item" onclick="${it.fn}"><div class="mi-ico" style="background:${it.bg}"><i class="fa-solid ${it.ico}"></i></div><div style="flex-grow:1;"><h4>${it.t}</h4>${it.s ? `<p class="meta" style="margin:2px 0 0;">${it.s}</p>` : ''}</div><i class="fa-solid fa-chevron-right" style="color:var(--muted);"></i></div>`).join('');

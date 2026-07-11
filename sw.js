@@ -1,7 +1,8 @@
 /* Service Worker สำหรับ PWA "ตามงาน"
-   - แคช app shell ให้เปิดได้เร็ว/ออฟไลน์บางส่วน
-   - ไม่แคชการเรียก API (Apps Script / Google) เพื่อให้ข้อมูลสดเสมอ */
-const CACHE = 'tamngan-v1';
+   - HTML: network-first (ได้เวอร์ชันใหม่เสมอเมื่อออนไลน์ กันปัญหาหน้าเก่าค้าง)
+   - ไฟล์ static (icon/manifest): stale-while-revalidate (อัปเดตเงียบๆ เบื้องหลัง)
+   - ไม่แคชการเรียก API ของ Google (Apps Script) */
+const CACHE = 'tamngan-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', e => {
@@ -16,16 +17,34 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-  // ปล่อยผ่าน: ไม่ใช่ GET หรือเป็นการเรียก API ของ Google (Apps Script)
-  if (e.request.method !== 'GET' || /google|gstatic/.test(url.hostname)) return;
-  e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request).then(resp => {
-      if (resp && resp.status === 200 && url.origin === location.origin) {
-        const copy = resp.clone();
-        caches.open(CACHE).then(c => c.put(e.request, copy));
-      }
-      return resp;
-    }).catch(() => caches.match('./index.html')))
-  );
+  const req = e.request;
+  const url = new URL(req.url);
+  // ปล่อยผ่าน: ไม่ใช่ GET หรือเป็น API ของ Google (Apps Script)
+  if (req.method !== 'GET' || /google|gstatic/.test(url.hostname)) return;
+
+  // HTML / การนำทาง → network-first
+  if (req.mode === 'navigate') {
+    e.respondWith(
+      fetch(req).then(r => { const c = r.clone(); caches.open(CACHE).then(x => x.put('./index.html', c)); return r; })
+        .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  // static ของเราเอง → stale-while-revalidate
+  if (url.origin === location.origin) {
+    e.respondWith(
+      caches.match(req).then(cached => {
+        const net = fetch(req).then(r => {
+          if (r && r.status === 200) { const c = r.clone(); caches.open(CACHE).then(x => x.put(req, c)); }
+          return r;
+        }).catch(() => cached);
+        return cached || net;
+      })
+    );
+    return;
+  }
+
+  // ข้ามโดเมน (ฟอนต์/ไอคอน CDN) → cache-first
+  e.respondWith(caches.match(req).then(c => c || fetch(req)));
 });
